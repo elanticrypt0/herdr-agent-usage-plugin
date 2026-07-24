@@ -60,44 +60,53 @@ function formatTimeRemaining(timestamp?: number): string {
   return "0m";
 }
 
-function renderUsageBar(percentage: number, width: number = 3): string {
-  const filled = Math.ceil((percentage / 100) * width);
+function renderUsageBar(percentage: number, width: number = 10): string {
+  const filled = Math.round((percentage / 100) * width);
   const empty = Math.max(0, width - filled);
   const bar = "█".repeat(filled) + "░".repeat(empty);
   return bar;
 }
 
 function formatUsageDisplay(usage: UsageData): string {
-  const claudeIcon = "✨";
-  const parts: string[] = [claudeIcon];
+  const claudeIcon = "\x1b[38;5;208m✻\x1b[0m";
+  const header = claudeIcon + " Your Claude usage";
+  const usageParts: string[] = [];
 
   if (usage.session) {
     const sessionPct = Math.round(usage.session.usage_percentage);
     const sessionTime = formatTimeRemaining(usage.session.reset_timestamp);
     const sessionBar = renderUsageBar(usage.session.usage_percentage);
-    parts.push(`${sessionBar} ${sessionPct}% ${sessionTime}`);
+    usageParts.push(`Session: ${sessionBar} ${sessionPct}% ${sessionTime}`);
   }
 
   if (usage.weekly) {
     const weeklyPct = Math.round(usage.weekly.usage_percentage);
     const weeklyTime = formatTimeRemaining(usage.weekly.reset_timestamp);
     const weeklyBar = renderUsageBar(usage.weekly.usage_percentage);
-    parts.push(`${weeklyBar} ${weeklyPct}% ${weeklyTime}`);
+    usageParts.push(`Weekly: ${weeklyBar} ${weeklyPct}% ${weeklyTime}`);
   }
 
-  return parts.join(" · ");
+  return header + "\n" + usageParts.join("    ");
 }
 
 function main(): void {
-  const usage = readUsageData();
+  const refreshInterval = 30000; // 30 seconds
 
-  if (!usage || (!usage.session && !usage.weekly)) {
-    console.log("No Claude usage detected");
-    process.exit(0);
+  function display(): void {
+    const usage = readUsageData();
+
+    if (!usage || (!usage.session && !usage.weekly)) {
+      console.log("No Claude usage detected");
+      return;
+    }
+
+    const displayText = formatUsageDisplay(usage);
+    console.clear();
+    console.log(displayText);
   }
 
-  const display = formatUsageDisplay(usage);
-  console.log(display);
+  display();
+  setInterval(display, refreshInterval);
 }
 
 main();

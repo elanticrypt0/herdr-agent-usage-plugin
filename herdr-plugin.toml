@@ -15,6 +15,6 @@ platforms = ["linux", "macos"]
 
 [[panes]]
 id = "claude_usage"
-title = "Claude Usage"
+title = "Agent usage"
 placement = "split"
 command = ["node", "dist/index.js"]
