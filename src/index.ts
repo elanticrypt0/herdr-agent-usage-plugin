@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-interface UsageData {
+interface AIUsage {
   session?: {
     usage_percentage: number;
     reset_timestamp?: number;
@@ -12,25 +12,49 @@ interface UsageData {
   };
 }
 
-function getClaudeUsageDir(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  return path.join(home, ".claude");
+interface UsageData {
+  claude?: AIUsage;
+  codex?: AIUsage;
+  gemini?: AIUsage;
 }
 
-function readUsageData(): UsageData | null {
+function getHomeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || "";
+}
+
+function readAIUsage(aiName: string, dirName: string): AIUsage | undefined {
   try {
-    const usageDir = getClaudeUsageDir();
-    const usagePath = path.join(usageDir, "usage.json");
+    const home = getHomeDir();
+    const usagePath = path.join(home, dirName, "usage.json");
 
     if (!fs.existsSync(usagePath)) {
-      return null;
+      return undefined;
     }
 
     const data = fs.readFileSync(usagePath, "utf-8");
     return JSON.parse(data);
   } catch (error) {
+    return undefined;
+  }
+}
+
+function readUsageData(): UsageData | null {
+  const usage: UsageData = {};
+
+  const claudeUsage = readAIUsage("claude", ".claude");
+  if (claudeUsage) usage.claude = claudeUsage;
+
+  const codexUsage = readAIUsage("codex", ".codex");
+  if (codexUsage) usage.codex = codexUsage;
+
+  const geminiUsage = readAIUsage("gemini", ".gemini");
+  if (geminiUsage) usage.gemini = geminiUsage;
+
+  if (Object.keys(usage).length === 0) {
     return null;
   }
+
+  return usage;
 }
 
 function formatTimeRemaining(timestamp?: number): string {
@@ -67,26 +91,60 @@ function renderUsageBar(percentage: number, width: number = 10): string {
   return bar;
 }
 
-function formatUsageDisplay(usage: UsageData): string {
-  const claudeIcon = "\x1b[38;5;208m✻\x1b[0m";
-  const header = claudeIcon + " Your Claude usage";
+function getAIIcon(aiName: string): string {
+  const icons: Record<string, string> = {
+    claude: "\x1b[38;5;208m✻\x1b[0m", // Orange starburst
+    codex: "\x1b[38;5;135m֎\x1b[0m", // Purple ornament
+    gemini: "\x1b[38;5;63m✦\x1b[0m", // Blue four-pointed star
+  };
+  return icons[aiName.toLowerCase()] || "●";
+}
+
+function formatAIUsage(aiName: string, aiUsage: AIUsage): string {
   const usageParts: string[] = [];
 
-  if (usage.session) {
-    const sessionPct = Math.round(usage.session.usage_percentage);
-    const sessionTime = formatTimeRemaining(usage.session.reset_timestamp);
-    const sessionBar = renderUsageBar(usage.session.usage_percentage);
+  if (aiUsage.session) {
+    const sessionPct = Math.round(aiUsage.session.usage_percentage);
+    const sessionTime = formatTimeRemaining(aiUsage.session.reset_timestamp);
+    const sessionBar = renderUsageBar(aiUsage.session.usage_percentage);
     usageParts.push(`Session: ${sessionBar} ${sessionPct}% ${sessionTime}`);
   }
 
-  if (usage.weekly) {
-    const weeklyPct = Math.round(usage.weekly.usage_percentage);
-    const weeklyTime = formatTimeRemaining(usage.weekly.reset_timestamp);
-    const weeklyBar = renderUsageBar(usage.weekly.usage_percentage);
+  if (aiUsage.weekly) {
+    const weeklyPct = Math.round(aiUsage.weekly.usage_percentage);
+    const weeklyTime = formatTimeRemaining(aiUsage.weekly.reset_timestamp);
+    const weeklyBar = renderUsageBar(aiUsage.weekly.usage_percentage);
     usageParts.push(`Weekly: ${weeklyBar} ${weeklyPct}% ${weeklyTime}`);
   }
 
+  const icon = getAIIcon(aiName);
+  const header = `${icon} ${aiName} usage`;
   return header + "\n" + usageParts.join("    ");
+}
+
+function formatUsageDisplay(usage: UsageData): string {
+  const robotIcon = "\x1b[38;5;255m𖠌\x1b[0m";
+  const sections: string[] = [];
+
+  const aiTools = [
+    { key: "claude" as const, name: "Claude" },
+    { key: "codex" as const, name: "Codex" },
+    { key: "gemini" as const, name: "Gemini" },
+  ];
+
+  for (const tool of aiTools) {
+    const toolUsage = usage[tool.key];
+    if (toolUsage && (toolUsage.session || toolUsage.weekly)) {
+      sections.push(formatAIUsage(tool.name, toolUsage));
+    }
+  }
+
+  if (sections.length === 0) {
+    return "No usage for Claude, Codex or Gemini detected";
+  }
+
+  const header = robotIcon + " Your AI usage";
+  return header + "\n" + sections.join("\n\n");
 }
 
 function main(): void {
@@ -95,8 +153,8 @@ function main(): void {
   function display(): void {
     const usage = readUsageData();
 
-    if (!usage || (!usage.session && !usage.weekly)) {
-      console.log("No Claude usage detected");
+    if (!usage) {
+      console.log("No usage for Claude, Codex or Gemini detected");
       return;
     }
 
