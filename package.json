@@ -1,0 +1,17 @@
+{
+  "name": "herdr-claude-usage-plugin",
+  "version": "0.1.0",
+  "description": "Display Claude API usage in Herdr",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "node dist/index.js"
+  },
+  "keywords": ["herdr", "claude", "usage"],
+  "author": "Tomáš Dam",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
