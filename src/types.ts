@@ -22,6 +22,8 @@ interface BaseProviderConfig {
   icon?: string;
   color?: number;
   enabled?: boolean;
+  /** Herdr agent id(s) this provider maps to in the sidebar, e.g. "open_code". */
+  agent?: string | string[];
 }
 
 export interface FileProviderConfig extends BaseProviderConfig {
@@ -33,6 +35,22 @@ export interface CommandProviderConfig extends BaseProviderConfig {
   type: "command";
   command: string;
   args?: string[];
+  poll_seconds?: number;
+  timeout_ms?: number;
+}
+
+export interface ClaudeProviderConfig extends BaseProviderConfig {
+  type: "claude";
+  /** Defaults to $CLAUDE_CONFIG_DIR or ~/.claude. */
+  config_dir?: string;
+  poll_seconds?: number;
+  timeout_ms?: number;
+}
+
+export interface CodexProviderConfig extends BaseProviderConfig {
+  type: "codex";
+  /** Defaults to $CODEX_HOME or ~/.codex. */
+  codex_home?: string;
   poll_seconds?: number;
   timeout_ms?: number;
 }
@@ -50,9 +68,29 @@ export interface OpenCodeProviderConfig extends BaseProviderConfig {
 export type ProviderConfig =
   | FileProviderConfig
   | CommandProviderConfig
+  | ClaudeProviderConfig
+  | CodexProviderConfig
   | OpenCodeProviderConfig;
+
+export type SidebarFormat = "compact" | "bar" | "percent";
+
+/** Which window the bar and the summary highlight. "max" picks the fullest one. */
+export type SidebarPrimary = "session" | "weekly" | "monthly" | "max";
+
+export interface SidebarConfig {
+  enabled: boolean;
+  interval_seconds: number;
+  token: string;
+  format: SidebarFormat;
+  primary: SidebarPrimary;
+  bar_width: number;
+  show_reset: boolean;
+  /** When set, a summary of every provider is pushed as a workspace token too. */
+  workspace_token: string | null;
+}
 
 export interface PluginConfig {
   refresh_seconds: number;
   providers: ProviderConfig[];
+  sidebar: SidebarConfig;
 }

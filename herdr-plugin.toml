@@ -13,6 +13,12 @@ platforms = ["linux", "macos"]
 command = ["npm", "run", "build"]
 platforms = ["linux", "macos"]
 
+# Background updater: pushes usage into the sidebar as pane/workspace metadata
+# tokens ($usage). Disable with "sidebar": { "enabled": false } in the plugin config.
+[[startup]]
+command = ["node", "dist/index.js", "--sidebar"]
+platforms = ["linux", "macos"]
+
 [[panes]]
 id = "claude_usage"
 title = "Agent usage"

@@ -1,13 +1,27 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { PluginConfig, ProviderConfig } from "./types";
+import { PluginConfig, ProviderConfig, SidebarConfig, SidebarFormat, SidebarPrimary } from "./types";
 
 const DEFAULT_REFRESH_SECONDS = 30;
 
+const DEFAULT_SIDEBAR: SidebarConfig = {
+  enabled: true,
+  interval_seconds: 60,
+  token: "usage",
+  format: "compact",
+  primary: "session",
+  bar_width: 5,
+  show_reset: false,
+  workspace_token: null,
+};
+
+const SIDEBAR_FORMATS: SidebarFormat[] = ["compact", "bar", "percent"];
+const SIDEBAR_PRIMARIES: SidebarPrimary[] = ["session", "weekly", "monthly", "max"];
+
 const DEFAULT_PROVIDERS: ProviderConfig[] = [
-  { type: "file", name: "Claude", path: "~/.claude/usage.json", icon: "✻", color: 208 },
-  { type: "file", name: "Codex", path: "~/.codex/usage.json", icon: "֎", color: 135 },
+  { type: "claude", name: "Claude", icon: "✻", color: 208 },
+  { type: "codex", name: "Codex", icon: "֎", color: 135 },
   { type: "file", name: "Gemini", path: "~/.gemini/usage.json", icon: "✦", color: 63 },
 ];
 
@@ -32,9 +46,10 @@ function configCandidates(): string[] {
   }
 
   const configHome = process.env.XDG_CONFIG_HOME || path.join(getHomeDir(), ".config");
+  const names = ["agents-usage.json", "agent-usage.json"];
   return [
-    path.join(configHome, "herdr", "agent-usage.json"),
-    path.join(getHomeDir(), ".herdr", "agent-usage.json"),
+    ...names.map((name) => path.join(configHome, "herdr", name)),
+    ...names.map((name) => path.join(getHomeDir(), ".herdr", name)),
   ];
 }
 
@@ -69,7 +84,7 @@ function isSupported(provider: ProviderConfig): boolean {
   if (!provider || typeof provider.name !== "string" || !provider.name.trim()) {
     return false;
   }
-  return provider.type === "file" || provider.type === "command" || provider.type === "opencode";
+  return ["file", "command", "claude", "codex", "opencode"].includes(provider.type);
 }
 
 /** Type-level fallbacks so a minimal config entry still gets a proper icon. */
@@ -129,6 +144,37 @@ function mergeProviders(configured: unknown): ProviderConfig[] {
   return Array.from(merged.values()).filter((provider) => provider.enabled !== false);
 }
 
+function mergeSidebar(configured: unknown): SidebarConfig {
+  const raw = (configured ?? {}) as Partial<SidebarConfig>;
+  const format = SIDEBAR_FORMATS.includes(raw.format as SidebarFormat)
+    ? (raw.format as SidebarFormat)
+    : DEFAULT_SIDEBAR.format;
+
+  const primary = SIDEBAR_PRIMARIES.includes(raw.primary as SidebarPrimary)
+    ? (raw.primary as SidebarPrimary)
+    : DEFAULT_SIDEBAR.primary;
+
+  return {
+    enabled: raw.enabled !== false,
+    interval_seconds:
+      typeof raw.interval_seconds === "number" && raw.interval_seconds >= 5
+        ? raw.interval_seconds
+        : DEFAULT_SIDEBAR.interval_seconds,
+    token: typeof raw.token === "string" && raw.token.trim() ? raw.token.trim() : DEFAULT_SIDEBAR.token,
+    format,
+    primary,
+    bar_width:
+      typeof raw.bar_width === "number" && raw.bar_width >= 1 && raw.bar_width <= 20
+        ? Math.round(raw.bar_width)
+        : DEFAULT_SIDEBAR.bar_width,
+    show_reset: raw.show_reset === true,
+    workspace_token:
+      typeof raw.workspace_token === "string" && raw.workspace_token.trim()
+        ? raw.workspace_token.trim()
+        : null,
+  };
+}
+
 export function loadConfig(): { config: PluginConfig; error?: string } {
   const { config, error } = readConfigFile();
 
@@ -141,6 +187,7 @@ export function loadConfig(): { config: PluginConfig; error?: string } {
     config: {
       refresh_seconds: refreshSeconds,
       providers: mergeProviders(config.providers),
+      sidebar: mergeSidebar((config as Record<string, unknown>).sidebar),
     },
     error,
   };

@@ -24,5 +24,14 @@
       "enabled": false,
       "path": "~/.gemini/usage.json"
     }
-  ]
+  ],
+  "sidebar": {
+    "enabled": true,
+    "interval_seconds": 60,
+    "token": "usage",
+    "format": "compact",
+    "bar_width": 5,
+    "show_reset": false,
+    "workspace_token": null
+  }
 }

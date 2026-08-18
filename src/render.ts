@@ -1,4 +1,4 @@
-import { AIUsage, ProviderResult, UsageWindow } from "./types";
+import { AIUsage, ProviderResult, SidebarConfig, UsageWindow } from "./types";
 import { hasUsage } from "./usage";
 
 const RESET = "\x1b[0m";
@@ -84,4 +84,74 @@ export function formatUsageDisplay(results: ProviderResult[], warning?: string):
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Sidebar tokens share a row with other tokens in a column that is often 26
+ * cells wide, so they stay short and carry no ANSI codes — styling is done in
+ * herdr's config with { token = "$usage", fg = "…" }.
+ */
+function pickPrimaryWindow(usage: AIUsage, sidebar: SidebarConfig): UsageWindow | undefined {
+  const available = [usage.session, usage.weekly, usage.monthly].filter(
+    (window): window is UsageWindow => Boolean(window)
+  );
+
+  if (available.length === 0) {
+    return undefined;
+  }
+  if (sidebar.primary === "max") {
+    return available.reduce((a, b) => (b.usage_percentage > a.usage_percentage ? b : a));
+  }
+
+  return usage[sidebar.primary] ?? available[0];
+}
+
+export function formatSidebarToken(usage: AIUsage, sidebar: SidebarConfig): string | null {
+  const session = usage.session;
+  const weekly = usage.weekly;
+  const primary = pickPrimaryWindow(usage, sidebar);
+
+  if (!primary) {
+    return null;
+  }
+
+  const percent = (window: UsageWindow) => `${Math.round(window.usage_percentage)}%`;
+  const reset = sidebar.show_reset ? formatTimeRemaining(primary.reset_timestamp) : "";
+
+  let text: string;
+  switch (sidebar.format) {
+    case "bar":
+      // Only the primary window: a bar plus every percentage does not fit a
+      // sidebar column.
+      text = `${renderUsageBar(primary.usage_percentage, sidebar.bar_width)} ${percent(primary)}`;
+      break;
+    case "percent":
+      text = [session, weekly, usage.monthly]
+        .filter((window): window is UsageWindow => Boolean(window))
+        .map(percent)
+        .join("/");
+      break;
+    default:
+      text = [
+        session ? `S ${percent(session)}` : "",
+        weekly ? `W ${percent(weekly)}` : "",
+        usage.monthly ? `M ${percent(usage.monthly)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+  }
+
+  return reset ? `${text} ${reset}` : text;
+}
+
+/** One-line summary of every provider, for the optional workspace token. */
+export function formatSidebarSummary(results: ProviderResult[], sidebar: SidebarConfig): string | null {
+  const parts = results
+    .filter((result) => hasUsage(result.usage))
+    .map((result) => {
+      const window = pickPrimaryWindow(result.usage!, sidebar)!;
+      return `${result.icon || DEFAULT_ICON}${Math.round(window.usage_percentage)}%`;
+    });
+
+  return parts.length > 0 ? parts.join(" ") : null;
 }
