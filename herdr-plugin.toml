@@ -2,7 +2,7 @@ id = "claude-usage"
 name = "Claude Usage"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Display Claude API usage at the bottom of Herdr"
+description = "Display AI agent usage (Claude, Codex, Gemini, OpenCode…) at the bottom of Herdr"
 platforms = ["linux", "macos"]
 
 [[build]]

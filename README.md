@@ -1,33 +1,33 @@
 # AI Usage Plugin for Herdr
 
-Display Claude, Codex, and Gemini API usage directly in Herdr. Keep track of session and weekly usage percentages and reset times at a glance in a split pane.
+Display AI agent usage directly in Herdr. Claude, Codex and Gemini work out of the box from their
+local `usage.json` files, and any other agent — OpenCode included — can be added through a config
+file. Session, weekly and monthly percentages plus reset times, at a glance in a split pane.
 
 ## Features
 
-- **Multi-AI Support**: Display Claude, Codex, and Gemini usage simultaneously
-- **Session & Weekly Tracking**: Shows both session and weekly usage percentages with reset times
-- **Visual Progress Bars**: Accurate 10-character progress bars reflecting actual percentages
-- **Colored Icons**: Each AI tool has a distinct colored icon for quick identification
-  - 𖠌 Claude: Orange ✻
-  - Codex: Purple ֎
-  - Gemini: Blue ✦
-- **Split Pane Display**: Always-visible panel in Herdr session for quick reference
-- **Auto-Refresh**: Updates every 30 seconds automatically
-- **Smart Display**: Only shows available AI tools, hides unavailable ones
-- **Fallback Messages**: Clear messaging when usage data is unavailable
+- **Built-in agents**: Claude, Codex and Gemini are read automatically from `~/.claude`, `~/.codex`, `~/.gemini`
+- **OpenCode support**: fetches live usage from `opencode.ai` with your session cookie (and optionally a workspace ID)
+- **Extensible**: add any agent with a `file` provider (local JSON) or a `command` provider (any command that prints usage JSON)
+- **Session, Weekly & Monthly Tracking**: percentages with reset times
+- **Visual Progress Bars**: 10-character bars reflecting actual percentages
+- **Colored Icons**: each agent has its own icon and 256-color code, configurable
+- **Smart Polling**: local files are re-read on every refresh, remote providers use their own slower poll interval and keep the last good numbers when a fetch fails
+- **Split Pane Display**: always-visible panel in Herdr session
+- **Smart Display**: only shows agents with data or with something to report
 
 ## Requirements
 
 - Herdr v0.7.0 or later
-- Node.js 18+ (for running the plugin)
-- At least one of: `~/.claude/usage.json`, `~/.codex/usage.json`, or `~/.gemini/usage.json`
+- Node.js 18+ (global `fetch` is required for the OpenCode provider)
+- At least one agent with usage data (a local `usage.json`, or a configured OpenCode/command provider)
 
 ## Installation
 
 ### Link Plugin (Local Development)
 
 ```bash
-herdr plugin link /path/to/herdr-claude-usage-plugin
+herdr plugin link /path/to/herdr-agent-usage-plugin
 ```
 
 Then open the pane:
@@ -39,14 +39,12 @@ herdr plugin pane open --plugin claude-usage --entrypoint claude_usage
 ### Install from GitHub (Once Published)
 
 ```bash
-herdr plugin install username/herdr-claude-usage-plugin
+herdr plugin install username/herdr-agent-usage-plugin
 ```
 
 ## Usage
 
 ### Opening the Usage Display
-
-Once installed, open the AI usage pane from Herdr:
 
 ```bash
 herdr plugin pane open --plugin claude-usage --entrypoint claude_usage
@@ -63,9 +61,15 @@ entrypoint = "claude_usage"
 description = "Show AI usage"
 ```
 
+### Debugging from the terminal
+
+```bash
+node dist/index.js --once         # render once and exit (no screen clearing)
+node dist/index.js --config-path  # print the config file being used
+```
+
 ### Output Format
 
-**With all three AI tools:**
 ```
 𖠌 Your AI usage
 ✻ Claude usage
@@ -76,54 +80,155 @@ Session: ███████░░░ 72% 4h    Weekly: ████░░░�
 
 ✦ Gemini usage
 Session: ██░░░░░░░░ 23% 2d    Weekly: ██░░░░░░░░ 18% 6d
+
+◆ OpenCode usage
+Session: ████░░░░░░ 37% 2h    Weekly: ██████░░░░ 64% 5d    Monthly: █░░░░░░░░░ 13% 14d
 ```
 
 **Format breakdown:**
 - **𖠌**: Header icon (white)
-- **✻ / ֎ / ✦**: AI tool icons with colors
+- **✻ / ֎ / ✦ / ◆**: agent icons with colors
 - **Progress bars**: 10-character bars showing actual usage percentage
-- **Percentage**: Usage as percentage of limit
-- **Time**: Time until reset (h = hours, d = days, wk = week)
+- **Percentage**: usage as percentage of limit
+- **Time**: time until reset (m = minutes, h = hours, d = days)
 
-**When usage data unavailable:**
+When an agent is configured but cannot report, its line shows the reason instead:
+
 ```
-No usage for Claude, Codex or Gemini detected
+◆ OpenCode usage
+⚠ Session cookie not configured
 ```
 
-**When only some tools available:**
-Only displays tools with available data; others are automatically hidden.
+## Configuration
+
+The plugin works with no configuration at all: Claude, Codex and Gemini are read from their default
+paths. To add other agents, create:
+
+```
+~/.config/herdr/agent-usage.json
+```
+
+(alternatives: `$XDG_CONFIG_HOME/herdr/agent-usage.json`, `~/.herdr/agent-usage.json`, or any path in
+`HERDR_AGENT_USAGE_CONFIG`). A sample lives in [`examples/agent-usage.json`](examples/agent-usage.json).
+
+```json
+{
+  "refresh_seconds": 30,
+  "providers": [
+    {
+      "type": "opencode",
+      "name": "OpenCode",
+      "icon": "◆",
+      "color": 250,
+      "cookie_file": "~/.config/herdr/opencode-cookie.txt",
+      "workspace_id": "wrk_xxxxxxxxxxxx",
+      "poll_seconds": 900
+    }
+  ]
+}
+```
+
+Entries are merged **on top of** the built-in agents by `name`, so you can also re-point, re-color or
+disable a built-in:
+
+```json
+{ "type": "file", "name": "Gemini", "enabled": false, "path": "~/.gemini/usage.json" }
+```
+
+### Common fields
+
+| Field | Applies to | Description |
+|---|---|---|
+| `type` | all | `file`, `command` or `opencode` |
+| `name` | all | Display name, also the merge key against built-ins |
+| `icon` | all | Any character, e.g. `◆` |
+| `color` | all | 256-color index for the icon (e.g. `208` orange) |
+| `enabled` | all | `false` removes the provider |
+
+### `file` provider
+
+| Field | Description |
+|---|---|
+| `path` | Path to a usage JSON file (`~` is expanded) |
+
+### `command` provider
+
+Runs a command and parses its stdout as usage JSON — the escape hatch for any agent with a CLI.
+
+| Field | Description |
+|---|---|
+| `command` | Command to run (executed through the shell unless `args` is given) |
+| `args` | Optional argument array (skips the shell) |
+| `poll_seconds` | How often to run it (default `300`, minimum `5`) |
+| `timeout_ms` | Command timeout (default `15000`) |
+
+### `opencode` provider
+
+Fetches usage from `https://opencode.ai` using your browser session.
+
+| Field | Description |
+|---|---|
+| `cookie` | Session cookie: the bare value, `auth=…`, or the full `Cookie` header |
+| `cookie_file` | Path to a file containing the cookie (preferred — keeps it out of the config) |
+| `cookie_env` | Name of an environment variable holding the cookie |
+| `workspace_id` | Workspace ID (`wrk_…` or `wk_…`). Optional: auto-discovered when omitted |
+| `poll_seconds` | Poll interval (default `900`, minimum `30`) |
+| `timeout_ms` | Request timeout (default `15000`) |
+
+Cookie sources are tried in order: `cookie_file`, `cookie_env`, `cookie`.
+
+You can also skip the config file entirely and export:
+
+```bash
+export HERDR_OPENCODE_COOKIE='auth=Fe26.2**…'
+export HERDR_OPENCODE_WORKSPACE_ID='wrk_xxxxxxxxxxxx'   # optional
+```
+
+#### Getting the session cookie and workspace ID
+
+1. Log in at <https://opencode.ai> in your browser.
+2. Open DevTools → **Network**, click any request to `opencode.ai`, and copy the **Cookie** request
+   header (or just the `auth` cookie value from **Application → Cookies**).
+3. Store it somewhere the config points at, and keep the file private:
+
+   ```bash
+   printf '%s' 'auth=Fe26.2**…' > ~/.config/herdr/opencode-cookie.txt
+   chmod 600 ~/.config/herdr/opencode-cookie.txt
+   ```
+
+4. The **workspace ID** is the `wrk_…` segment in the URL of your workspace page
+   (`https://opencode.ai/workspace/wrk_xxxxxxxxxxxx/go`). It is optional — the plugin asks
+   opencode.ai for your workspaces when it is not set — but setting it saves a request and avoids
+   ambiguity when you belong to several workspaces.
+
+The cookie expires like any browser session; when it does, the pane shows
+`Session cookie rejected — copy a fresh one from opencode.ai` and you repeat the steps above.
 
 ## How It Works
 
-The plugin:
-
-1. Reads usage data from multiple AI tool directories (`~/.claude`, `~/.codex`, `~/.gemini`)
-2. Parses `usage.json` files from each tool directory
-3. Extracts session and weekly usage percentages and reset timestamps
-4. Calculates time remaining until usage resets
-5. Renders formatted display with colored icons and progress bars
-6. Auto-refreshes every 30 seconds in split pane
-7. Only displays available AI tools with data
+1. Loads the provider list: built-in Claude/Codex/Gemini file providers merged with your config
+2. `file` providers are re-read on every refresh (default every 30s)
+3. `command` and `opencode` providers run on their own poll interval and are served from cache in between
+4. OpenCode: sends the auth cookie to `opencode.ai`, resolves the workspace (from config or the workspaces
+   endpoint), loads `/workspace/<id>/go` and extracts `rollingUsage` / `weeklyUsage` / `monthlyUsage`
+5. Percentages and reset times are normalized into session / weekly / monthly windows
+6. The pane re-renders on the refresh interval, and again as soon as a background fetch lands
+7. A failed remote fetch keeps the last good numbers instead of blanking the pane
 
 ## Data Locations
 
-The plugin reads usage data from three locations:
+**Built-in file providers:**
 
-**Claude:**
-- File: `~/.claude/usage.json`
-- Icon: Orange ✻
+| Agent | File | Icon |
+|---|---|---|
+| Claude | `~/.claude/usage.json` | Orange ✻ |
+| Codex | `~/.codex/usage.json` | Purple ֎ |
+| Gemini | `~/.gemini/usage.json` | Blue ✦ |
 
-**Codex:**
-- File: `~/.codex/usage.json`
-- Icon: Purple ֎
+**OpenCode:** no local file — read live from `opencode.ai` (needs cookie + optional workspace ID).
 
-**Gemini:**
-- File: `~/.gemini/usage.json`
-- Icon: Blue ✦
+### Usage file format
 
-### File Format
-
-Each usage file should have this structure:
 ```json
 {
   "session": {
@@ -137,8 +242,14 @@ Each usage file should have this structure:
 }
 ```
 
-- `usage_percentage`: Number between 0-100
+- `usage_percentage`: number between 0-100
 - `reset_timestamp`: Unix timestamp in milliseconds when usage resets
+
+The parser is tolerant, which is what makes `command` providers easy to write. It also accepts:
+
+- window keys `rolling` / `rollingUsage` (as session), `weeklyUsage`, `monthly` / `monthlyUsage`
+- percentage keys `usagePercent`, `used_percent`, `usedPercent`, `percent`
+- reset keys `resetsAt`, `reset_at` (seconds or milliseconds), `resetInSec`, `reset_in_sec`
 
 ## Building from Source
 
@@ -157,11 +268,30 @@ Built files go to `dist/`.
 
 ## Troubleshooting
 
-### Plugin shows "No usage for Claude, Codex or Gemini detected"
+### Plugin shows "No agent usage detected"
 
-- Verify at least one AI tool directory exists: `~/.claude/`, `~/.codex/`, or `~/.gemini/`
-- Check that corresponding `usage.json` files exist and are valid JSON
-- Ensure you have active subscriptions for the AI tools you want to track
+- Verify at least one agent directory exists: `~/.claude/`, `~/.codex/`, or `~/.gemini/`
+- Check that the corresponding `usage.json` files exist and are valid JSON
+- For other agents, confirm the config is being loaded: `node dist/index.js --config-path`
+
+### OpenCode line shows an error
+
+| Message | Fix |
+|---|---|
+| `Session cookie not configured` | Set `cookie`, `cookie_file` or `cookie_env` (or `HERDR_OPENCODE_COOKIE`) |
+| `No auth cookie found …` | The pasted value has no `auth` / `__Host-auth` cookie — copy the full Cookie header |
+| `Session cookie rejected …` | The session expired; copy a fresh cookie |
+| `Invalid workspace ID …` | It must match `wrk_…` or `wk_…` |
+| `No workspace found …` | Set `workspace_id` explicitly |
+| `Could not parse usage data from page` | opencode.ai changed its page layout — open an issue |
+
+Run `node dist/index.js --once` to see the raw result without the pane refreshing over it.
+
+### Config file ignored
+
+- Confirm the path with `node dist/index.js --config-path`
+- Invalid JSON is reported as a warning line at the top of the pane
+- Providers need a `name` and a supported `type` (`file`, `command`, `opencode`)
 
 ### Pane won't open
 
@@ -172,16 +302,15 @@ Built files go to `dist/`.
 
 ### Usage data not refreshing
 
-- Plugin auto-refreshes every 30 seconds
-- Usage data is cached from AI services
-- Restart the corresponding AI CLI tool to refresh data
-- Check that usage.json files are being updated by the AI tools
+- Local files refresh every `refresh_seconds` (default 30)
+- Remote providers refresh on `poll_seconds` (OpenCode default 900 = 15 min)
+- Restart the corresponding AI CLI tool if it is not updating its own `usage.json`
 
-### Only some AI tools showing
+## Security Notes
 
-- This is normal behavior - only tools with available usage data are displayed
-- Ensure usage.json exists in the tool's directory
-- Check file format matches expected structure
+- The OpenCode session cookie grants access to your opencode.ai account. Prefer `cookie_file` with
+  `chmod 600`, or `cookie_env`, over inlining it in the config file.
+- The plugin only ever sends the cookie to `https://opencode.ai`, and only issues GET requests.
 
 ## License
 

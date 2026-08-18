@@ -1,170 +1,162 @@
-import * as fs from "fs";
-import * as path from "path";
+import { getConfigPath, loadConfig } from "./config";
+import { fetchCommandUsage } from "./providers/command";
+import { fetchFileUsage } from "./providers/file";
+import { fetchOpenCodeUsage } from "./providers/opencode";
+import { formatUsageDisplay } from "./render";
+import { PluginConfig, ProviderConfig, ProviderResult } from "./types";
+import { hasUsage } from "./usage";
 
-interface AIUsage {
-  session?: {
-    usage_percentage: number;
-    reset_timestamp?: number;
-  };
-  weekly?: {
-    usage_percentage: number;
-    reset_timestamp?: number;
-  };
+const DEFAULT_REMOTE_POLL_SECONDS = 900;
+const DEFAULT_COMMAND_POLL_SECONDS = 300;
+
+interface CacheEntry {
+  result: ProviderResult;
+  fetchedAt: number;
+  inFlight: boolean;
 }
 
-interface UsageData {
-  claude?: AIUsage;
-  codex?: AIUsage;
-  gemini?: AIUsage;
+const cache = new Map<string, CacheEntry>();
+
+function cacheKey(provider: ProviderConfig): string {
+  return `${provider.type}:${provider.name.toLowerCase()}`;
 }
 
-function getHomeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || "";
+function pollIntervalMs(provider: ProviderConfig): number {
+  if (provider.type === "opencode") {
+    return Math.max(30, provider.poll_seconds ?? DEFAULT_REMOTE_POLL_SECONDS) * 1000;
+  }
+  if (provider.type === "command") {
+    return Math.max(5, provider.poll_seconds ?? DEFAULT_COMMAND_POLL_SECONDS) * 1000;
+  }
+  return 0;
 }
 
-function readAIUsage(aiName: string, dirName: string): AIUsage | undefined {
-  try {
-    const home = getHomeDir();
-    const usagePath = path.join(home, dirName, "usage.json");
+function fetchProvider(provider: ProviderConfig): Promise<ProviderResult> {
+  switch (provider.type) {
+    case "file":
+      return fetchFileUsage(provider);
+    case "command":
+      return fetchCommandUsage(provider);
+    case "opencode":
+      return fetchOpenCodeUsage(provider);
+  }
+}
 
-    if (!fs.existsSync(usagePath)) {
-      return undefined;
+/**
+ * Remote and command providers are polled on their own (slower) schedule and
+ * served from cache in between, so the pane can keep refreshing every few
+ * seconds without hammering opencode.ai. A failed refresh keeps the last good
+ * numbers instead of blanking the pane.
+ */
+function readCached(provider: ProviderConfig, onUpdate: () => void): ProviderResult {
+  const key = cacheKey(provider);
+  const entry = cache.get(key);
+  const isStale = !entry || Date.now() - entry.fetchedAt >= pollIntervalMs(provider);
+
+  if (isStale && !entry?.inFlight) {
+    const pending: CacheEntry = entry ?? {
+      result: { name: provider.name, icon: provider.icon, color: provider.color },
+      fetchedAt: 0,
+      inFlight: true,
+    };
+    pending.inFlight = true;
+    cache.set(key, pending);
+
+    fetchProvider(provider)
+      .then((result) => {
+        const previous = cache.get(key)?.result;
+        if (!hasUsage(result.usage) && previous && hasUsage(previous.usage)) {
+          result.usage = previous.usage;
+          result.error = undefined;
+        }
+        cache.set(key, { result, fetchedAt: Date.now(), inFlight: false });
+      })
+      .catch((error) => {
+        const previous = cache.get(key)?.result;
+        cache.set(key, {
+          result: {
+            name: provider.name,
+            icon: provider.icon,
+            color: provider.color,
+            usage: previous?.usage,
+            error: hasUsage(previous?.usage)
+              ? undefined
+              : error instanceof Error
+                ? error.message
+                : String(error),
+          },
+          fetchedAt: Date.now(),
+          inFlight: false,
+        });
+      })
+      .finally(onUpdate);
+  }
+
+  return (
+    cache.get(key)?.result ?? {
+      name: provider.name,
+      icon: provider.icon,
+      color: provider.color,
+      error: "Loading…",
     }
-
-    const data = fs.readFileSync(usagePath, "utf-8");
-    return JSON.parse(data);
-  } catch (error) {
-    return undefined;
-  }
+  );
 }
 
-function readUsageData(): UsageData | null {
-  const usage: UsageData = {};
+async function collectResults(config: PluginConfig, onUpdate: () => void): Promise<ProviderResult[]> {
+  const results: ProviderResult[] = [];
 
-  const claudeUsage = readAIUsage("claude", ".claude");
-  if (claudeUsage) usage.claude = claudeUsage;
-
-  const codexUsage = readAIUsage("codex", ".codex");
-  if (codexUsage) usage.codex = codexUsage;
-
-  const geminiUsage = readAIUsage("gemini", ".gemini");
-  if (geminiUsage) usage.gemini = geminiUsage;
-
-  if (Object.keys(usage).length === 0) {
-    return null;
-  }
-
-  return usage;
-}
-
-function formatTimeRemaining(timestamp?: number): string {
-  if (!timestamp) return "";
-
-  const now = Date.now();
-  const msRemaining = timestamp - now;
-
-  if (msRemaining <= 0) {
-    return "0m";
-  }
-
-  const secondsRemaining = Math.floor(msRemaining / 1000);
-  const minutesRemaining = Math.floor(secondsRemaining / 60);
-  const hoursRemaining = Math.floor(minutesRemaining / 60);
-  const daysRemaining = Math.floor(hoursRemaining / 24);
-
-  if (daysRemaining > 0) {
-    return `${daysRemaining}d`;
-  }
-  if (hoursRemaining > 0) {
-    return `${hoursRemaining}h`;
-  }
-  if (minutesRemaining > 0) {
-    return `${minutesRemaining}m`;
-  }
-  return "0m";
-}
-
-function renderUsageBar(percentage: number, width: number = 10): string {
-  const filled = Math.round((percentage / 100) * width);
-  const empty = Math.max(0, width - filled);
-  const bar = "█".repeat(filled) + "░".repeat(empty);
-  return bar;
-}
-
-function getAIIcon(aiName: string): string {
-  const icons: Record<string, string> = {
-    claude: "\x1b[38;5;208m✻\x1b[0m", // Orange starburst
-    codex: "\x1b[38;5;135m֎\x1b[0m", // Purple ornament
-    gemini: "\x1b[38;5;63m✦\x1b[0m", // Blue four-pointed star
-  };
-  return icons[aiName.toLowerCase()] || "●";
-}
-
-function formatAIUsage(aiName: string, aiUsage: AIUsage): string {
-  const usageParts: string[] = [];
-
-  if (aiUsage.session) {
-    const sessionPct = Math.round(aiUsage.session.usage_percentage);
-    const sessionTime = formatTimeRemaining(aiUsage.session.reset_timestamp);
-    const sessionBar = renderUsageBar(aiUsage.session.usage_percentage);
-    usageParts.push(`Session: ${sessionBar} ${sessionPct}% ${sessionTime}`);
-  }
-
-  if (aiUsage.weekly) {
-    const weeklyPct = Math.round(aiUsage.weekly.usage_percentage);
-    const weeklyTime = formatTimeRemaining(aiUsage.weekly.reset_timestamp);
-    const weeklyBar = renderUsageBar(aiUsage.weekly.usage_percentage);
-    usageParts.push(`Weekly: ${weeklyBar} ${weeklyPct}% ${weeklyTime}`);
-  }
-
-  const icon = getAIIcon(aiName);
-  const header = `${icon} ${aiName} usage`;
-  return header + "\n" + usageParts.join("    ");
-}
-
-function formatUsageDisplay(usage: UsageData): string {
-  const robotIcon = "\x1b[38;5;255m𖠌\x1b[0m";
-  const sections: string[] = [];
-
-  const aiTools = [
-    { key: "claude" as const, name: "Claude" },
-    { key: "codex" as const, name: "Codex" },
-    { key: "gemini" as const, name: "Gemini" },
-  ];
-
-  for (const tool of aiTools) {
-    const toolUsage = usage[tool.key];
-    if (toolUsage && (toolUsage.session || toolUsage.weekly)) {
-      sections.push(formatAIUsage(tool.name, toolUsage));
+  for (const provider of config.providers) {
+    if (provider.type === "file") {
+      results.push(await fetchFileUsage(provider));
+    } else {
+      results.push(readCached(provider, onUpdate));
     }
   }
 
-  if (sections.length === 0) {
-    return "No usage for Claude, Codex or Gemini detected";
-  }
+  return results;
+}
 
-  const header = robotIcon + " Your AI usage";
-  return header + "\n" + sections.join("\n\n");
+async function renderOnce(config: PluginConfig, warning?: string): Promise<void> {
+  const results = await Promise.all(config.providers.map(fetchProvider));
+  console.log(formatUsageDisplay(results, warning));
 }
 
 function main(): void {
-  const refreshInterval = 30000; // 30 seconds
-
-  function display(): void {
-    const usage = readUsageData();
-
-    if (!usage) {
-      console.log("No usage for Claude, Codex or Gemini detected");
-      return;
-    }
-
-    const displayText = formatUsageDisplay(usage);
-    console.clear();
-    console.log(displayText);
+  if (process.argv.includes("--config-path")) {
+    console.log(getConfigPath() ?? "no config file found");
+    return;
   }
 
-  display();
-  setInterval(display, refreshInterval);
+  const { config, error } = loadConfig();
+
+  if (process.argv.includes("--once")) {
+    void renderOnce(config, error);
+    return;
+  }
+
+  const refreshMs = config.refresh_seconds * 1000;
+  let rendering = false;
+
+  async function display(): Promise<void> {
+    if (rendering) {
+      return;
+    }
+    rendering = true;
+
+    try {
+      const results = await collectResults(config, () => {
+        // Re-render once the pending fetch lands, after this pass finishes.
+        setTimeout(() => void display(), 0);
+      });
+      console.clear();
+      console.log(formatUsageDisplay(results, error));
+    } finally {
+      rendering = false;
+    }
+  }
+
+  void display();
+  setInterval(() => void display(), refreshMs);
 }
 
 main();

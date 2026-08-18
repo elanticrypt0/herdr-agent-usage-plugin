@@ -1,0 +1,28 @@
+{
+  "refresh_seconds": 30,
+  "providers": [
+    {
+      "type": "opencode",
+      "name": "OpenCode",
+      "icon": "◆",
+      "color": 250,
+      "cookie_file": "~/.config/herdr/opencode-cookie.txt",
+      "workspace_id": "wrk_replace_me",
+      "poll_seconds": 900
+    },
+    {
+      "type": "command",
+      "name": "My Agent",
+      "icon": "◇",
+      "color": 45,
+      "command": "my-agent usage --json",
+      "poll_seconds": 300
+    },
+    {
+      "type": "file",
+      "name": "Gemini",
+      "enabled": false,
+      "path": "~/.gemini/usage.json"
+    }
+  ]
+}

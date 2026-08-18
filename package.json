@@ -1,14 +1,21 @@
 {
-  "name": "herdr-claude-usage-plugin",
+  "name": "herdr-agent-usage-plugin",
   "version": "0.1.0",
-  "description": "Display Claude API usage in Herdr",
+  "description": "Display Claude, Codex, Gemini and OpenCode usage in Herdr",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "node dist/index.js"
   },
-  "keywords": ["herdr", "claude", "usage"],
-  "author": "Tomáš Dam",
+  "keywords": [
+    "herdr",
+    "claude",
+    "codex",
+    "gemini",
+    "opencode",
+    "usage"
+  ],
+  "author": "Tom\u00e1\u0161 Dam",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",
